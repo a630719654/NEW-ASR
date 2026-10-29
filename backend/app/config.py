@@ -59,7 +59,7 @@ ASR_DROP_QUIET_DB = float(os.getenv("ASR_DROP_QUIET_DB", "35"))
 
 AUDIO_DIR = Path(os.getenv("AUDIO_DIR", str(BACKEND_DIR / "storage" / "audio")))
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
 FRONTEND_DIR = PROJECT_DIR / "frontend"
 
-SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "28800"))
+SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "43200"))

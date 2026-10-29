@@ -72,3 +72,9 @@ CREATE TABLE IF NOT EXISTS user_terms (
     UNIQUE (user_id, term)
 );
 CREATE INDEX IF NOT EXISTS user_terms_user_idx ON user_terms (user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS login_locks (
+    username VARCHAR(32) PRIMARY KEY,
+    failed_count INT NOT NULL DEFAULT 0,
+    locked_until TIMESTAMPTZ
+);

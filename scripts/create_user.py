@@ -7,9 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
+from app import audit
 from app.db import get_conn
 from app.repositories import users
-from app.security import hash_password
+from app.security import hash_password, registration_error
 
 
 def main() -> int:
@@ -20,24 +21,46 @@ def main() -> int:
     args = ap.parse_args()
 
     username = args.username.strip()
-    if not 1 <= len(username) <= 100:
-        print("帳號長度須為 1–100 字元")
-        return 1
     password = args.password or getpass.getpass("密碼：")
-    if len(password) < 6:
-        print("密碼至少 6 個字元")
+    reason = registration_error(username, password)
+    if reason == "username":
+        audit.record(
+            username=username, ip="local", action="註冊被拒",
+            detail={"reason": "username"}, secrets=(password,),
+        )
+        print("帳號只允許 3 到 32 碼的英數字或底線")
+        return 1
+    if reason == "password":
+        audit.record(
+            username=username, ip="local", action="註冊被拒",
+            detail={"reason": "password"}, secrets=(password,),
+        )
+        print("密碼至少 12 碼，而且要同時含英文字母和數字")
         return 1
 
     with get_conn() as conn:
-        if users.get_by_username(conn, username):
+        existing = users.get_by_username(conn, username)
+        if existing:
             if not args.reset:
+                audit.record(
+                    user_id=existing["id"], username=username, ip="local",
+                    action="註冊被拒", detail={"reason": "exists"}, secrets=(password,),
+                )
                 print(f"帳號 {username} 已存在；要重設密碼請加 --reset")
                 return 1
             users.set_password(conn, username, hash_password(password))
+            user_id = existing["id"]
+            detail = {"reset": True}
             print(f"✅ 已重設 {username} 的密碼")
         else:
             row = users.create_user(conn, username, hash_password(password))
+            user_id = row["id"]
+            detail = {}
             print(f"✅ 已建立帳號 {row['username']}（id={row['id']}）")
+    audit.record(
+        user_id=user_id, username=username, ip="local",
+        action="建立帳號", detail=detail, secrets=(password,),
+    )
     return 0
 
 

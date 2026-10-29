@@ -62,7 +62,13 @@ if [ "$(psql_admin "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'")" != "
 fi
 PGPASSWORD="$DB_PASSWORD" psql -q -h localhost -U "$DB_USER" -d "$DB_NAME" \
   -v ON_ERROR_STOP=1 -f database/schema.sql
-python scripts/create_user.py "${DEMO_USERNAME:-demo}" --password "${DEMO_PASSWORD:-demo1234}" --reset
+if [ -n "${DEMO_PASSWORD:-}" ]; then
+  if ! python scripts/create_user.py "${DEMO_USERNAME:-demo}" --password "${DEMO_PASSWORD}" --reset; then
+    echo "建立登入帳號失敗。DEMO_PASSWORD 至少 12 碼，而且要同時含英文字母和數字。其餘安裝繼續。"
+  fi
+else
+  echo "未設定 DEMO_PASSWORD，略過建立登入帳號"
+fi
 echo "完成：資料庫 ${DB_NAME}"
 
 step 4 "安裝 Ollama 並下載 ${LLM_MODEL}"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import logging
 import uuid
@@ -7,9 +8,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import BinaryIO
 
-from app import config
+from app import audit, config
+from app.access import Missing, NotOwner, classify
 from app.db import get_conn
 from app.repositories import meetings, summaries, terms, transcripts
+from app import uploads
 from app.services.asr_service import get_asr_service
 from app.services.language import SUPPORTED as SUMMARY_LANGUAGES, transcript_language
 from app.services.summarizer_service import get_summarizer_service
@@ -59,6 +62,34 @@ def _warmup() -> None:
         log.exception("ASR 模型預先載入失敗（第一次辨識時會再試一次）")
 
 
+def _load_owned(conn, meeting_id, actor: dict, ip: str):
+    meeting = meetings.get_meeting(conn, meeting_id)
+    try:
+        return classify(meeting, actor["id"])
+    except NotOwner:
+        if meeting is not None:
+            audit.record(
+                user_id=actor["id"],
+                username=actor.get("username") or "",
+                ip=ip,
+                action="權限不足",
+                detail={"meeting_id": str(meeting_id)},
+            )
+        raise NotFound() from None
+    except Missing:
+        raise NotFound() from None
+
+
+def _snapshot(meeting_id, actor: dict, ip: str, action: str, previous) -> None:
+    audit.record_content(
+        user_id=actor["id"],
+        username=actor.get("username") or "",
+        ip=ip,
+        action=action,
+        previous=previous,
+    )
+
+
 def create_meeting(
     *,
     meeting_name: str,
@@ -70,8 +101,7 @@ def create_meeting(
     created_by=None,
 ) -> dict:
     meeting_id = uuid.uuid4()
-    suffix = Path(original_filename or "").suffix.lower()[:10] or ".bin"
-    audio_path = config.AUDIO_DIR / f"{meeting_id}{suffix}"
+    audio_path = uploads.audio_destination(config.AUDIO_DIR, meeting_id, original_filename)
 
     _save_upload(audio_file, audio_path)
     try:
@@ -107,6 +137,7 @@ def create_meeting_from_transcript(
     original_filename: str,
     created_by=None,
 ) -> dict:
+    uploads.transcript_suffix(original_filename)
     data = transcript_file.read(MAX_TRANSCRIPT_BYTES + 1)
     if len(data) > MAX_TRANSCRIPT_BYTES:
         raise TooLarge("逐字稿檔超過 5 MB")
@@ -133,13 +164,12 @@ def create_meeting_from_transcript(
 
 
 def _save_upload(src: BinaryIO, dest: Path) -> None:
-    limit = config.MAX_UPLOAD_MB * 1024 * 1024
     written = 0
     try:
         with dest.open("wb") as out:
             while chunk := src.read(1024 * 1024):
                 written += len(chunk)
-                if written > limit:
+                if uploads.too_large(written):
                     raise TooLarge(f"音檔超過 {config.MAX_UPLOAD_MB} MB")
                 out.write(chunk)
         if written == 0:
@@ -210,12 +240,10 @@ def _run_proofread(meeting_id: uuid.UUID) -> None:
         _mark_failed(meeting_id, "proofreading", "PROOFREAD_FAILED", f"錯字校對失敗：{exc}")
 
 
-def get_proofread(meeting_id: uuid.UUID | str) -> dict:
+def get_proofread(meeting_id: uuid.UUID | str, *, actor: dict, ip: str = "") -> dict:
     with get_conn() as conn:
-        meeting = meetings.get_meeting(conn, meeting_id)
-        row = transcripts.get_row(conn, meeting_id) if meeting else None
-    if meeting is None:
-        raise NotFound()
+        meeting = _load_owned(conn, meeting_id, actor, ip)
+        row = transcripts.get_row(conn, meeting_id)
     if row is None:
         raise Conflict(f"逐字稿尚未產生（目前狀態：{meeting['status']}）")
     return _proofread_view(meeting["status"], row["proofread"], row["confirmed_at"])
@@ -238,33 +266,34 @@ def _proofread_view(status: str, proofread: dict | None, confirmed_at) -> dict:
     }
 
 
-def _edit(meeting_id, fn) -> dict:
+def _edit(meeting_id, fn, *, actor: dict, ip: str) -> dict:
     with get_conn() as conn:
-        meeting = meetings.get_meeting(conn, meeting_id)
-        if meeting is None:
-            raise NotFound()
+        meeting = _load_owned(conn, meeting_id, actor, ip)
         row = transcripts.get_row(conn, meeting_id, for_update=True)
         if row is None or meeting["status"] != "reviewing" or row["confirmed_at"] is not None:
             raise Conflict(f"目前狀態為 {meeting['status']}，只有校對完成、還沒確認的逐字稿可以修改")
         transcript, proofread = row["transcript"], row["proofread"] or {"suggestions": [], "problems": []}
+        previous = copy.deepcopy({"transcript": transcript, "proofread": proofread})
         result = fn(transcript, proofread["suggestions"], proofread)
         transcripts.save_edits(conn, meeting_id, transcript, proofread)
+        _snapshot(meeting_id, actor, ip, "修改", previous)
     return {"result": result, "transcript": transcript,
             "proofread": _proofread_view(meeting["status"], proofread, None)}
 
 
-def review_typos(meeting_id, *, action: str, ids: list[str] | None, replacement: str | None) -> dict:
+def review_typos(meeting_id, *, action: str, ids: list[str] | None, replacement: str | None,
+                 actor: dict, ip: str = "") -> dict:
     def fn(transcript, suggestions, proofread):
         try:
             return typo_service.apply_decision(transcript, suggestions, ids, action, replacement)
         except ValueError as exc:
             raise BadRequest(str(exc)) from None
-    out = _edit(meeting_id, fn)
+    out = _edit(meeting_id, fn, actor=actor, ip=ip)
     out["done"] = out.pop("result")
     return out
 
 
-def edit_segment(meeting_id, segment_id: str, text: str) -> dict:
+def edit_segment(meeting_id, segment_id: str, text: str, *, actor: dict, ip: str = "") -> dict:
     def fn(transcript, suggestions, proofread):
         try:
             typo_service.edit_segment(transcript, suggestions, segment_id, text)
@@ -272,12 +301,13 @@ def edit_segment(meeting_id, segment_id: str, text: str) -> dict:
             raise BadRequest(f"找不到段落 {segment_id}") from None
         except ValueError as exc:
             raise BadRequest(str(exc)) from None
-    out = _edit(meeting_id, fn)
+    out = _edit(meeting_id, fn, actor=actor, ip=ip)
     out.pop("result")
     return out
 
 
-def replace_text(meeting_id, *, find: str, replace: str, segment_id: str | None, offset: int | None) -> dict:
+def replace_text(meeting_id, *, find: str, replace: str, segment_id: str | None, offset: int | None,
+                 actor: dict, ip: str = "") -> dict:
     def fn(transcript, suggestions, proofread):
         try:
             n = typo_service.replace_text(transcript, suggestions, find, replace, segment_id, offset)
@@ -288,54 +318,54 @@ def replace_text(meeting_id, *, find: str, replace: str, segment_id: str | None,
         if n:
             typo_service.record_manual(proofread, find, replace, n)
         return n
-    out = _edit(meeting_id, fn)
+    out = _edit(meeting_id, fn, actor=actor, ip=ip)
     out["replaced"] = out.pop("result")
     return out
 
 
-def confirm_transcript(meeting_id) -> dict:
+def confirm_transcript(meeting_id, *, actor: dict, ip: str = "") -> dict:
     with get_conn() as conn:
-        meeting = meetings.get_meeting(conn, meeting_id)
-        if meeting is None:
-            raise NotFound()
+        meeting = _load_owned(conn, meeting_id, actor, ip)
         row = transcripts.get_row(conn, meeting_id, for_update=True)
         if row is None or meeting["status"] != "reviewing" or row["confirmed_at"] is not None:
             raise Conflict(f"目前狀態為 {meeting['status']}，沒有等待確認的逐字稿")
+        previous = copy.deepcopy({"transcript": row["transcript"], "proofread": row["proofread"]})
         proofread = row["proofread"]
         if proofread:
             for t in proofread["suggestions"]:
                 if t["status"] == "pending":
                     t["status"] = "ignored"
         transcripts.confirm(conn, meeting_id, proofread)
-        meeting = meetings.update_status(conn, meeting_id, "transcribed")
+        meeting = meetings.update_status(conn, meeting_id, "transcribed", owner_id=actor["id"])
+        _snapshot(meeting_id, actor, ip, "修改", previous)
     return meeting
 
 
-def request_proofread(meeting_id) -> dict:
+def request_proofread(meeting_id, *, actor: dict, ip: str = "") -> dict:
     with get_conn() as conn:
-        meeting = meetings.start_proofreading(conn, meeting_id)
+        current = _load_owned(conn, meeting_id, actor, ip)
+        row = transcripts.get_row(conn, meeting_id)
+        meeting = meetings.start_proofreading(conn, meeting_id, owner_id=actor["id"])
         if meeting is None:
-            current = meetings.get_meeting(conn, meeting_id)
-    if meeting is None:
-        if current is None:
-            raise NotFound()
-        raise Conflict(f"目前狀態為 {current['status']}，逐字稿確認之前才能重新校對")
+            raise Conflict(f"目前狀態為 {current['status']}，逐字稿確認之前才能重新校對")
+        _snapshot(meeting_id, actor, ip, "重新產生", {
+            "transcript": None if row is None else row.get("transcript"),
+            "proofread": None if row is None else row.get("proofread"),
+        })
     _worker.submit(_run_proofread, meeting["id"])
     return meeting
 
 
-def request_summary(meeting_id: uuid.UUID | str, language: str | None = None) -> dict:
+def request_summary(meeting_id: uuid.UUID | str, language: str | None = None, *, actor: dict, ip: str = "") -> dict:
     if language is not None and language not in SUMMARY_LANGUAGES:
         raise BadRequest(f"重點語言只能是 {'、'.join(SUMMARY_LANGUAGES)}，收到：{language}")
     with get_conn() as conn:
-        meeting = meetings.start_summarizing(conn, meeting_id)
+        current = _load_owned(conn, meeting_id, actor, ip)
+        previous = summaries.get_summary(conn, meeting_id)
+        meeting = meetings.start_summarizing(conn, meeting_id, owner_id=actor["id"])
         if meeting is None:
-            current = meetings.get_meeting(conn, meeting_id)
-    if meeting is None:
-        if current is None:
-            raise NotFound()
-        raise Conflict(f"目前狀態為 {current['status']}，需要先確認逐字稿才能產生重點")
-
+            raise Conflict(f"目前狀態為 {current['status']}，需要先確認逐字稿才能產生重點")
+        _snapshot(meeting_id, actor, ip, "重新產生", {"summary": previous})
     _worker.submit(_run_summary, meeting["id"], language)
     return meeting
 
@@ -363,34 +393,46 @@ def _run_summary(meeting_id: uuid.UUID, language: str | None = None) -> None:
         _mark_failed(meeting_id, "summarizing", "SUMMARY_GENERATION_FAILED", f"產生重點失敗：{exc}")
 
 
-def get_meeting(meeting_id: uuid.UUID | str) -> dict:
+def get_meeting(meeting_id: uuid.UUID | str, *, actor: dict, ip: str = "") -> dict:
     with get_conn() as conn:
-        meeting = meetings.get_meeting(conn, meeting_id)
-    if meeting is None:
-        raise NotFound()
-    return meeting
+        return _load_owned(conn, meeting_id, actor, ip)
 
 
-def get_transcript(meeting_id: uuid.UUID | str) -> dict:
+def get_transcript(meeting_id: uuid.UUID | str, *, actor: dict, ip: str = "") -> dict:
     with get_conn() as conn:
-        meeting = meetings.get_meeting(conn, meeting_id)
-        transcript = transcripts.get_transcript(conn, meeting_id) if meeting else None
-    if meeting is None:
-        raise NotFound()
+        meeting = _load_owned(conn, meeting_id, actor, ip)
+        transcript = transcripts.get_transcript(conn, meeting_id)
     if transcript is None:
         raise Conflict(f"逐字稿尚未產生（目前狀態：{meeting['status']}）")
     return transcript
 
 
-def get_summary(meeting_id: uuid.UUID | str) -> tuple[dict, dict]:
+def get_summary(meeting_id: uuid.UUID | str, *, actor: dict, ip: str = "") -> tuple[dict, dict]:
     with get_conn() as conn:
-        meeting = meetings.get_meeting(conn, meeting_id)
-        summary = summaries.get_summary(conn, meeting_id) if meeting else None
-    if meeting is None:
-        raise NotFound()
+        meeting = _load_owned(conn, meeting_id, actor, ip)
+        summary = summaries.get_summary(conn, meeting_id)
     if summary is None:
         raise Conflict(f"重點尚未產生（目前狀態：{meeting['status']}）")
     return meeting, summary
+
+
+def delete_owned_meeting(meeting_id: uuid.UUID | str, *, actor: dict, ip: str = "") -> dict:
+    with get_conn() as conn:
+        meeting = _load_owned(conn, meeting_id, actor, ip)
+        row = transcripts.get_row(conn, meeting_id)
+        summary = summaries.get_summary(conn, meeting_id)
+        previous = {
+            "meeting_name": meeting.get("meeting_name"),
+            "audio_path": meeting.get("audio_path"),
+            "transcript": None if row is None else row.get("transcript"),
+            "summary": summary,
+        }
+        _snapshot(meeting_id, actor, ip, "刪除", previous)
+        deleted = meetings.delete_meeting(conn, meeting_id, owner_id=actor["id"])
+    if deleted is None:
+        raise NotFound()
+    uploads.unlink_inside(config.AUDIO_DIR, meeting.get("audio_path"))
+    return deleted
 
 
 def _mark_failed(meeting_id, stage: str, code: str, message: str) -> None:
@@ -409,5 +451,5 @@ __all__ = [
     "BadRequest", "Conflict", "NotFound", "TooLarge", "confirm_transcript", "create_meeting",
     "create_meeting_from_transcript", "edit_segment", "get_meeting", "get_proofread", "get_summary",
     "get_transcript", "on_startup", "replace_text", "request_proofread", "request_summary", "review_typos",
-    "wait_for_idle",
+    "delete_owned_meeting", "wait_for_idle",
 ]

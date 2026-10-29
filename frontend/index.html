@@ -61,6 +61,21 @@
             <label>密碼<input class="line-input" name="password" type="password" required autocomplete="current-password"></label>
             <p class="error" id="loginError" hidden></p>
             <button class="btn primary pill-btn" type="submit">進入會議室 <span aria-hidden="true">→</span></button>
+            <button class="linkish" type="button" id="showRegister">建立帳號</button>
+          </form>
+          <form id="registerForm" class="login-form" hidden>
+            <label>帳號
+              <input class="line-input" name="username" autocomplete="username" required>
+            </label>
+            <label>密碼
+              <input class="line-input" name="password" type="password" autocomplete="new-password" required>
+            </label>
+            <label>再輸入一次密碼
+              <input class="line-input" name="password2" type="password" autocomplete="new-password" required>
+            </label>
+            <p class="error" id="registerError" hidden></p>
+            <button class="btn primary pill-btn" type="submit">建立帳號 <span aria-hidden="true">→</span></button>
+            <button class="linkish" type="button" id="showLogin">回到登入</button>
           </form>
         </div>
         <div class="login-foot"><span>本機模式 · 錄音不上雲</span><span>台語＋華語辨識</span></div>

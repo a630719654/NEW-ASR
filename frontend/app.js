@@ -44,6 +44,32 @@ async function api(path, { method = "GET", json, form } = {}) {
 
 function showError(el, msg) { el.textContent = msg; el.hidden = !msg; }
 
+function showAuth(which, message) {
+  const register = which === "register";
+  $("loginForm").hidden = register;
+  $("registerForm").hidden = !register;
+  showError($("loginError"), register ? "" : (message || ""));
+  showError($("registerError"), "");
+}
+
+function accountOk(name) { return /^[A-Za-z0-9_]{3,32}$/.test(name); }
+function passwordOk(password) {
+  return password.length >= 12 && password.length <= 200 && /[A-Za-z]/.test(password) && /[0-9]/.test(password);
+}
+
+async function enterRoom(data, form) {
+  state.token = data.access_token;
+  state.user = data.user;
+  form.reset();
+  showAuth("login");
+  if (window.Entrance) await Entrance.close(state.user.username);
+  showApp();
+  if (window.Entrance) Entrance.open();
+}
+
+$("showRegister").addEventListener("click", () => showAuth("register"));
+$("showLogin").addEventListener("click", () => showAuth("login"));
+
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
@@ -52,13 +78,35 @@ $("loginForm").addEventListener("submit", async (e) => {
     const data = await api("/api/v1/auth/login", {
       method: "POST", json: { username: f.get("username"), password: f.get("password") },
     });
-    state.token = data.access_token;
-    state.user = data.user;
-    e.target.reset();
-    if (window.Entrance) await Entrance.close(state.user.username);
-    showApp();
-    if (window.Entrance) Entrance.open();
+    await enterRoom(data, e.target);
   } catch (err) { showError($("loginError"), err.message); }
+});
+
+$("registerForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const username = String(f.get("username") || "").trim();
+  const password = String(f.get("password") || "");
+  const again = String(f.get("password2") || "");
+  showError($("registerError"), "");
+  if (!accountOk(username)) {
+    showError($("registerError"), "帳號只允許 3 到 32 碼的英數字或底線");
+    return;
+  }
+  if (!passwordOk(password)) {
+    showError($("registerError"), "密碼至少 12 碼，而且要同時含英文字母和數字");
+    return;
+  }
+  if (password !== again) {
+    showError($("registerError"), "兩次輸入的密碼不相同");
+    return;
+  }
+  try {
+    const data = await api("/api/v1/auth/register", {
+      method: "POST", json: { username, password },
+    });
+    await enterRoom(data, e.target);
+  } catch (err) { showError($("registerError"), err.message); }
 });
 
 $("logoutBtn").addEventListener("click", async () => {
@@ -75,7 +123,7 @@ function logoutLocal(message) {
   $("loginView").hidden = false;
   document.body.classList.add("login-mode");
   if (window.Entrance) Entrance.greet();
-  showError($("loginError"), message || "");
+  showAuth("login", message || "");
 }
 
 function showApp() {

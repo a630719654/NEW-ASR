@@ -3,10 +3,10 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile, status
 from pydantic import BaseModel, Field
 
-from app.deps import api_error, get_current_user
+from app.deps import api_error, client_ip, get_current_user
 from app.services import meeting_service as svc
 
 router = APIRouter(
@@ -107,9 +107,15 @@ def _parse_time(value: str | None, field: str) -> dt.time | None:
         raise api_error(422, "INVALID_TIME", f"{field} 格式須為 HH:mm 或 HH:mm:ss") from None
 
 
+@router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_meeting(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> Response:
+    _call(lambda: svc.delete_owned_meeting(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/{meeting_id}/status")
-def get_status(meeting_id: str) -> dict:
-    m = _call(svc.get_meeting, _parse_id(meeting_id))
+def get_status(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+    m = _call(lambda: svc.get_meeting(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
     return {
         "meeting_id": str(m["id"]),
         "meeting_name": m["meeting_name"],
@@ -121,8 +127,8 @@ def get_status(meeting_id: str) -> dict:
 
 
 @router.get("/{meeting_id}/transcript")
-def get_transcript(meeting_id: str) -> dict:
-    return _call(svc.get_transcript, _parse_id(meeting_id))
+def get_transcript(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+    return _call(lambda: svc.get_transcript(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
 
 
 class TypoDecision(BaseModel):
@@ -143,37 +149,45 @@ class SegmentEdit(BaseModel):
 
 
 @router.get("/{meeting_id}/proofread")
-def get_proofread(meeting_id: str) -> dict:
-    return _call(svc.get_proofread, _parse_id(meeting_id))
+def get_proofread(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+    return _call(lambda: svc.get_proofread(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
 
 
 @router.post("/{meeting_id}/proofread", status_code=status.HTTP_202_ACCEPTED)
-def rerun_proofread(meeting_id: str) -> dict:
-    m = _call(svc.request_proofread, _parse_id(meeting_id))
+def rerun_proofread(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+    m = _call(lambda: svc.request_proofread(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
     return {"meeting_id": str(m["id"]), "status": m["status"], "status_url": _status_url(m["id"])}
 
 
 @router.post("/{meeting_id}/proofread/decisions")
-def decide_typos(meeting_id: str, body: TypoDecision) -> dict:
+def decide_typos(meeting_id: str, body: TypoDecision, request: Request, user: dict = Depends(get_current_user)) -> dict:
     mid = _parse_id(meeting_id)
-    return _call(lambda: svc.review_typos(mid, action=body.action, ids=body.ids, replacement=body.replacement))
+    return _call(lambda: svc.review_typos(
+        mid, action=body.action, ids=body.ids, replacement=body.replacement,
+        actor=user, ip=client_ip(request),
+    ))
 
 
 @router.put("/{meeting_id}/transcript/segments/{segment_id}")
-def edit_segment(meeting_id: str, segment_id: str, body: SegmentEdit) -> dict:
-    return _call(svc.edit_segment, _parse_id(meeting_id), segment_id, body.text)
+def edit_segment(meeting_id: str, segment_id: str, body: SegmentEdit, request: Request,
+                 user: dict = Depends(get_current_user)) -> dict:
+    return _call(lambda: svc.edit_segment(
+        _parse_id(meeting_id), segment_id, body.text, actor=user, ip=client_ip(request),
+    ))
 
 
 @router.post("/{meeting_id}/transcript/replace")
-def replace_text(meeting_id: str, body: TextReplace) -> dict:
+def replace_text(meeting_id: str, body: TextReplace, request: Request, user: dict = Depends(get_current_user)) -> dict:
     mid = _parse_id(meeting_id)
-    return _call(lambda: svc.replace_text(mid, find=body.find, replace=body.replace,
-                                          segment_id=body.segment_id, offset=body.offset))
+    return _call(lambda: svc.replace_text(
+        mid, find=body.find, replace=body.replace, segment_id=body.segment_id, offset=body.offset,
+        actor=user, ip=client_ip(request),
+    ))
 
 
 @router.post("/{meeting_id}/transcript/confirm")
-def confirm_transcript(meeting_id: str) -> dict:
-    m = _call(svc.confirm_transcript, _parse_id(meeting_id))
+def confirm_transcript(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+    m = _call(lambda: svc.confirm_transcript(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
     return {"meeting_id": str(m["id"]), "status": m["status"]}
 
 
@@ -182,16 +196,19 @@ class SummaryRequest(BaseModel):
 
 
 @router.post("/{meeting_id}/summary", status_code=status.HTTP_202_ACCEPTED)
-def generate_summary(meeting_id: str, body: SummaryRequest | None = None) -> dict:
+def generate_summary(meeting_id: str, request: Request, body: SummaryRequest | None = None,
+                     user: dict = Depends(get_current_user)) -> dict:
     language = body.language if body else None
-    m = _call(lambda: svc.request_summary(_parse_id(meeting_id), language))
+    m = _call(lambda: svc.request_summary(
+        _parse_id(meeting_id), language, actor=user, ip=client_ip(request),
+    ))
     return {"meeting_id": str(m["id"]), "status": m["status"], "status_url": _status_url(m["id"]),
             "language": language}
 
 
 @router.get("/{meeting_id}/summary")
-def get_summary(meeting_id: str) -> dict:
-    m, s = _call(svc.get_summary, _parse_id(meeting_id))
+def get_summary(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> dict:
+    m, s = _call(lambda: svc.get_summary(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
     return {
         "meeting_id": str(m["id"]),
         "summary": {

@@ -78,6 +78,15 @@ def _decode(row: dict | None) -> dict | None:
     return row
 
 
+def _and_owner(sql: str, params: tuple, owner_id: UUID | str | None) -> tuple[str, tuple]:
+    if owner_id is None:
+        return sql, params
+    needle = "WHERE id = %s"
+    if needle not in sql:
+        raise RuntimeError("owner filter missing anchor")
+    return sql.replace(needle, "WHERE id = %s AND created_by = %s", 1), params + (as_uuid(owner_id),)
+
+
 def create_meeting(
     conn,
     *,
@@ -102,14 +111,16 @@ def create_meeting(
     return _decode(row)
 
 
-def get_meeting(conn, meeting_id: UUID | str) -> dict | None:
-    return _decode(conn.execute(SQL_GET, (as_uuid(meeting_id),)).fetchone())
+def get_meeting(conn, meeting_id: UUID | str, owner_id: UUID | str | None = None) -> dict | None:
+    sql, params = _and_owner(SQL_GET, (as_uuid(meeting_id),), owner_id)
+    return _decode(conn.execute(sql, params).fetchone())
 
 
-def update_status(conn, meeting_id: UUID | str, status: str) -> dict | None:
+def update_status(conn, meeting_id: UUID | str, status: str, owner_id: UUID | str | None = None) -> dict | None:
     if status not in STATUSES or status == "failed":
         raise ValueError(f"不合法的狀態：{status}")
-    return _decode(conn.execute(SQL_SET_STATUS, (status, as_uuid(meeting_id))).fetchone())
+    sql, params = _and_owner(SQL_SET_STATUS, (status, as_uuid(meeting_id)), owner_id)
+    return _decode(conn.execute(sql, params).fetchone())
 
 
 def mark_failed(
@@ -119,16 +130,19 @@ def mark_failed(
     return _decode(conn.execute(SQL_SET_FAILED, (payload, as_uuid(meeting_id))).fetchone())
 
 
-def delete_meeting(conn, meeting_id: UUID | str) -> dict | None:
-    return conn.execute(SQL_DELETE, (as_uuid(meeting_id),)).fetchone()
+def delete_meeting(conn, meeting_id: UUID | str, owner_id: UUID | str | None = None) -> dict | None:
+    sql, params = _and_owner(SQL_DELETE, (as_uuid(meeting_id),), owner_id)
+    return conn.execute(sql, params).fetchone()
 
 
-def start_summarizing(conn, meeting_id: UUID | str) -> dict | None:
-    return _decode(conn.execute(SQL_START_SUMMARIZING, (as_uuid(meeting_id),)).fetchone())
+def start_summarizing(conn, meeting_id: UUID | str, owner_id: UUID | str | None = None) -> dict | None:
+    sql, params = _and_owner(SQL_START_SUMMARIZING, (as_uuid(meeting_id),), owner_id)
+    return _decode(conn.execute(sql, params).fetchone())
 
 
-def start_proofreading(conn, meeting_id: UUID | str) -> dict | None:
-    return _decode(conn.execute(SQL_START_PROOFREADING, (as_uuid(meeting_id),)).fetchone())
+def start_proofreading(conn, meeting_id: UUID | str, owner_id: UUID | str | None = None) -> dict | None:
+    sql, params = _and_owner(SQL_START_PROOFREADING, (as_uuid(meeting_id),), owner_id)
+    return _decode(conn.execute(sql, params).fetchone())
 
 
 def fail_interrupted(conn) -> int:
