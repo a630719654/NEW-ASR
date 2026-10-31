@@ -58,7 +58,7 @@ def hash_password(password: str) -> str:
     return f"{PBKDF2_ALGO}${PBKDF2_ITERATIONS}${_b64e(salt)}${_b64e(dk)}"
 
 
-def verify_password(password: str, stored: str) -> bool:
+def _verify_pbkdf2(password: str, stored: str) -> bool:
     try:
         algo, rounds, salt, expected = stored.split("$")
         if algo != PBKDF2_ALGO:
@@ -70,6 +70,32 @@ def verify_password(password: str, stored: str) -> bool:
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(dk, expected_b)
+
+
+def _verify_scrypt(password: str, stored: str) -> bool:
+    try:
+        algo, n, r, p, salt, expected = stored.split("$")
+        if algo != "scrypt":
+            return False
+        expected_b = _b64d(expected)
+        dk = hashlib.scrypt(
+            password.encode(), salt=_b64d(salt), n=int(n), r=int(r), p=int(p),
+            dklen=len(expected_b),
+        )
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(dk, expected_b)
+
+
+def verify_password(password: str, stored: str) -> bool:
+    if not isinstance(stored, str) or "$" not in stored:
+        return False
+    algo = stored.split("$", 1)[0]
+    if algo == PBKDF2_ALGO:
+        return _verify_pbkdf2(password, stored)
+    if algo == "scrypt":
+        return _verify_scrypt(password, stored)
+    return False
 
 
 DUMMY_PASSWORD_HASH = hash_password("dummy-password-not-used")

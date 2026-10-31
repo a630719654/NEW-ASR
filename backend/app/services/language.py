@@ -18,6 +18,11 @@ def latin_ratio(texts: list[str]) -> tuple[float, int, int]:
 
 
 def transcript_language(transcript: dict | None) -> str:
+    selected = ((transcript or {}).get("asr_info") or {}).get("language")
+    if selected == "en":
+        return "en"
+    if selected in ("zh", "nan", "hak"):
+        return "zh"
     texts = [s.get("text") or "" for s in (transcript or {}).get("segments", [])]
     ratio, n_lat, n_cjk = latin_ratio(texts)
     if n_lat + n_cjk == 0:

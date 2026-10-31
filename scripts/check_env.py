@@ -89,13 +89,14 @@ if "--no-asr" not in sys.argv:
         sample = BACKEND_DIR / "storage" / "samples" / "test.m4a"
         svc = ASRService()
         t0 = time.time()
-        segs = svc.transcribe(str(sample))
+        segs = svc.transcribe(str(sample), "zh")
         dt = time.time() - t0
-        svc.unload()
+        if svc.is_loaded:
+            raise RuntimeError("辨識完模型沒有卸載")
         if not segs:
             raise RuntimeError("辨識結果是空的")
         text = "".join(s["text"] for s in segs)
-        return f"{svc.model_name} {svc.spec.kind.value}/{svc.spec.compute_type}，{dt:.1f}s →「{text[:40]}」"
+        return f"{svc.model_name}，{dt:.1f}s（含載入、卸載）→「{text[:40]}」"
 
 
 lines = ["========== 環境檢查結果 =========="]

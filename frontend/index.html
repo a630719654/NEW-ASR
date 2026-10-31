@@ -102,6 +102,26 @@
               <span class="dz-file" id="audioChip" hidden></span>
               <input name="audio" type="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.webm,.ogg,.flac" required aria-label="選擇會議錄音">
             </label>
+            <div class="asr-lang" id="asrLangField">
+              <div class="source" role="radiogroup" aria-label="會議語言">
+                <span class="source-title">會議語言</span>
+                <label class="choice"><input type="radio" name="asr_language" value="zh" checked> 中文</label>
+                <label class="choice"><input type="radio" name="asr_language" value="nan"> 台語</label>
+                <label class="choice"><input type="radio" name="asr_language" value="hak"> 客語</label>
+                <label class="choice"><input type="radio" name="asr_language" value="en"> 英文</label>
+                <label class="sum-lang" id="dialectField" hidden title="客語腔調">腔調
+                  <select name="hakka_dialect">
+                    <option value="sixian" selected>四縣</option>
+                    <option value="hailu">海陸</option>
+                    <option value="dapu">大埔</option>
+                    <option value="raoping">饒平</option>
+                    <option value="zhaoan">詔安</option>
+                    <option value="nansixian">南四縣</option>
+                  </select>
+                </label>
+              </div>
+              <small class="hint" id="asrLangHint">只會啟動這個語言的辨識模型，辨識完就關閉，不占記憶體</small>
+            </div>
             <label class="dropzone" id="transcriptField" hidden>
               <svg class="dz-wave" width="120" height="40" viewBox="0 0 120 40" aria-hidden="true"><g fill="currentColor"><rect x="14" y="6" width="92" height="4" rx="2"/><rect x="14" y="16" width="72" height="4" rx="2"/><rect x="14" y="26" width="84" height="4" rx="2"/><rect x="14" y="36" width="48" height="4" rx="2"/></g></svg>
               <span class="dz-title">把逐字稿放到桌上</span>
@@ -234,7 +254,7 @@
     <section class="as-panel" id="asPanel" aria-label="會議小幫手" hidden>
       <header class="as-head">
         <div class="as-title">
-          <strong>鉛筆小騎士</strong>
+          <strong>鉛筆小書記</strong>
           <small>只回答你的會議紀錄相關問題</small>
         </div>
         <button class="as-close" id="asClose" type="button" aria-label="收起小幫手">
@@ -251,78 +271,22 @@
       </form>
     </section>
     <div class="as-hint" id="asHint">有會議上的問題，可以問我！</div>
-    <button class="as-launcher" id="asLauncher" type="button" aria-label="打開會議小幫手（鉛筆小騎士）" aria-expanded="false" aria-controls="asPanel">
-      <svg id="knightSvg" aria-hidden="true" focusable="false" viewBox="-130 30 260 215" data-state="idle" data-eyes="open" data-mouth="smile">
-        <line class="kn-ground" x1="-125" y1="234" x2="125" y2="234"/>
-        <ellipse class="kn-shadow" cx="0" cy="234" rx="44" ry="5"/>
-
-        <g class="kn-fx kn-paper">
-          <rect x="-126" y="156" width="40" height="52" rx="2" fill="#FFFDF7" stroke="#CFC4B0" stroke-width=".8"/>
-          <path d="M-120 166H-92M-120 174H-96M-120 190H-98M-120 198H-94" stroke="#CFC4B0" stroke-width="1.2"/>
-          <path class="kn-typo" d="M-118 184q2-2.5 4 0t4 0t4 0t4 0t4 0" fill="none" stroke="#D9534F" stroke-width="1.4"/>
-          <path class="kn-fixed" d="M-120 182H-96" stroke="#5F5E5A" stroke-width="1.2"/>
-          <path class="kn-check" d="M-94 150l4 4l8-9" fill="none" stroke="#3B7A57" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <g><circle class="kn-crumb" cx="-106" cy="196" r="1.4" fill="#F4A6B8"/><circle class="kn-crumb" cx="-110" cy="194" r="1.2" fill="#F4A6B8"/><circle class="kn-crumb" cx="-102" cy="195" r="1.2" fill="#F4A6B8"/></g>
-        </g>
-
-        <g class="kn-fx kn-waves" fill="none" stroke-width="1.6" stroke-linecap="round">
-          <path class="kn-wave-arc" d="M50 118Q55 126 50 134"/>
-          <path class="kn-wave-arc" d="M57 113Q64 126 57 139"/>
-          <path class="kn-wave-arc" d="M64 108Q73 126 64 144"/>
-        </g>
-
-        <g class="kn-fx kn-cards" stroke-width="1">
-          <g class="kn-card"><rect x="50" y="58" width="58" height="17" rx="3"/><circle cx="57" cy="66.5" r="2.2" fill="#E3A82B"/><path d="M63 64h38M63 69h26" stroke-linecap="round"/></g>
-          <g class="kn-card"><rect x="50" y="80" width="58" height="17" rx="3"/><circle cx="57" cy="88.5" r="2.2" fill="#E3A82B"/><path d="M63 86h34M63 91h30" stroke-linecap="round"/></g>
-          <g class="kn-card"><rect x="50" y="102" width="58" height="17" rx="3"/><circle cx="57" cy="110.5" r="2.2" fill="#E3A82B"/><path d="M63 108h38M63 113h22" stroke-linecap="round"/></g>
-        </g>
-        <path class="kn-fx kn-spark" d="M-95 50L-90 64L-76 64L-87 73L-83 87L-95 78L-107 87L-103 73L-114 64L-100 64Z" fill="none" stroke-width="1.6" stroke-linejoin="round"/>
-        <g class="kn-fx kn-zz"><text x="28" y="86">z</text><text x="38" y="72">Z</text></g>
-
-        <g class="kn-k">
-          <rect x="-14" y="208" width="10" height="16" fill="#FCE3CF"/><rect x="4" y="208" width="10" height="16" fill="#FCE3CF"/>
-          <ellipse cx="-9" cy="226" rx="9" ry="5" fill="#6B4A2F"/><ellipse cx="9" cy="226" rx="9" ry="5" fill="#6B4A2F"/>
-          <path d="M-22 152L22 152L30 208L-30 208Z" fill="#F7C948"/>
-          <line x1="-12" y1="152" x2="-15" y2="208" stroke="#F2B92E" stroke-width="3"/><line x1="12" y1="152" x2="15" y2="208" stroke="#F2B92E" stroke-width="3"/>
-          <rect x="-27" y="186" width="54" height="7" fill="#B4B2A9"/><rect x="-4" y="185" width="8" height="9" rx="1" fill="#888780"/>
-
-          <g class="kn-head">
-            <ellipse cx="0" cy="114" rx="38" ry="36" fill="#3B2A1E"/>
-            <circle cx="0" cy="118" r="34" fill="#FCE3CF"/>
-            <path d="M-34 110Q-18 94 0 104Q18 94 34 110L34 98L-34 98Z" fill="#3B2A1E"/>
-            <ellipse cx="4" cy="88" rx="42" ry="15" fill="#F4A6B8"/><circle cx="4" cy="72" r="5" fill="#F4A6B8"/>
-            <ellipse cx="-22" cy="134" rx="5" ry="3" fill="#F0997B" opacity=".6"/><ellipse cx="22" cy="134" rx="5" ry="3" fill="#F0997B" opacity=".6"/>
-            <g class="kn-look"><g class="kn-scan"><g class="kn-blink"><g class="kn-e-open">
-              <ellipse cx="-12" cy="124" rx="3.5" ry="5" fill="#2C2C2A"/><ellipse cx="12" cy="124" rx="3.5" ry="5" fill="#2C2C2A"/>
-              <circle cx="-11" cy="122" r="1.2" fill="#fff"/><circle cx="13" cy="122" r="1.2" fill="#fff"/>
-            </g></g></g></g>
-            <g class="kn-e-happy" fill="none" stroke="#2C2C2A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M-17 126L-12 120L-7 126"/><path d="M7 126L12 120L17 126"/></g>
-            <g class="kn-e-closed" fill="none" stroke="#2C2C2A" stroke-width="2.2" stroke-linecap="round"><path d="M-17 124Q-12 128 -7 124"/><path d="M7 124Q12 128 17 124"/></g>
-            <path class="kn-m-smile" d="M-5 136Q0 140 5 136" fill="none" stroke="#2C2C2A" stroke-width="1.8" stroke-linecap="round"/>
-            <path class="kn-m-big" d="M-6 135Q0 143 6 135Z" fill="#8A3B2E"/>
-            <ellipse class="kn-m-o" cx="0" cy="137.5" rx="2.4" ry="3" fill="#8A3B2E"/>
-            <path class="kn-m-flat" d="M-4 137H4" stroke="#2C2C2A" stroke-width="1.8" stroke-linecap="round"/>
-          </g>
-
-          <g class="kn-arm-r">
-            <g class="kn-mag">
-              <line x1="34" y1="188" x2="52.3" y2="175.9" stroke="#6B4A2F" stroke-width="3" stroke-linecap="round"/>
-              <circle cx="63.2" cy="168.75" r="13" fill="#CFE6F2" fill-opacity=".35" stroke="#888780" stroke-width="3"/>
-            </g>
-            <line x1="22" y1="162" x2="34" y2="188" stroke="#FCE3CF" stroke-width="7" stroke-linecap="round"/>
-          </g>
-
-          <g class="kn-arm-l">
-            <g class="kn-pen">
-              <rect x="-44" y="126" width="12" height="86" fill="#F7C948"/><rect x="-40" y="126" width="4" height="86" fill="#F2B92E"/>
-              <rect x="-44" y="120" width="12" height="7" fill="#B4B2A9"/><rect x="-44" y="109" width="12" height="12" rx="3" fill="#F4A6B8"/>
-              <polygon points="-44,212 -32,212 -38,232" fill="#EBCB9E"/><polygon points="-41,223 -35,223 -38,232" fill="#2C2C2A"/>
-            </g>
-            <line x1="-22" y1="162" x2="-38" y2="178" stroke="#FCE3CF" stroke-width="7" stroke-linecap="round"/>
-            <circle cx="-38" cy="178" r="4.6" fill="#FCE3CF"/>
-          </g>
-        </g>
-      </svg>
+    <button class="as-launcher" id="asLauncher" type="button" aria-label="打開會議小幫手（鉛筆小書記）" aria-expanded="false" aria-controls="asPanel">
+      <span class="ag" id="agent" aria-hidden="true">
+        <span class="ag-shadow" id="agShadow"></span>
+        <span class="ag-body" id="agBody">
+          <img class="ag-pose on" data-pose="idle" src="img/agent/idle.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="blink" src="img/agent/blink.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="wave" src="img/agent/wave.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="think" src="img/agent/think.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="sleep" src="img/agent/sleep.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="search" src="img/agent/search.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="listen" src="img/agent/listen.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="proofread" src="img/agent/proofread.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="summary" src="img/agent/summary.webp" alt="" draggable="false" decoding="async">
+          <img class="ag-pose" data-pose="done" src="img/agent/done.webp" alt="" draggable="false" decoding="async">
+        </span>
+      </span>
       <span class="as-badge" id="asBadge" hidden></span>
     </button>
   </div>

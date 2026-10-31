@@ -146,7 +146,9 @@ window.MeetUI = (() => {
       const r = await fetch("/api/v1/health");
       if (!r.ok) return;
       const d = await r.json();
-      if (d.asr_engine) byId("infoAsr").textContent = d.asr_engine;
+      if (d.asr_engine === "fake") byId("infoAsr").textContent = "fake（假逐字稿）";
+      else if (d.asr_models) byId("infoAsr").textContent = "依會議語言切換（中／台／客／英）";
+      else if (d.asr_engine) byId("infoAsr").textContent = d.asr_engine;
       if (d.llm_model) byId("infoLlm").textContent = d.llm_model;
     } catch (_) {  }
   }

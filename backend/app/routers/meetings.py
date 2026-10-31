@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFil
 from pydantic import BaseModel, Field
 
 from app.deps import api_error, client_ip, get_current_user
+from app.services import asr_models
 from app.services import meeting_service as svc
 
 router = APIRouter(
@@ -48,6 +49,8 @@ def upload_meeting(
     date: str = Form(...),
     start_time: str | None = Form(None),
     end_time: str | None = Form(None),
+    asr_language: str = Form("zh"),
+    hakka_dialect: str | None = Form(None),
     user: dict = Depends(get_current_user),
 ) -> dict:
     name = meeting_name.strip()
@@ -64,6 +67,12 @@ def upload_meeting(
     if st and et and et < st:
         raise api_error(422, "INVALID_TIME", "結束時間不能早於開始時間")
 
+    asr_language = (asr_language or "zh").strip().lower()
+    if asr_language not in asr_models.LANGUAGES:
+        raise api_error(422, "INVALID_LANGUAGE", f"會議語言只能是 {'、'.join(asr_models.LANGUAGES)}")
+    if asr_language == "hak" and hakka_dialect and hakka_dialect.strip().lower() not in asr_models.HAKKA_DIALECTS:
+        raise api_error(422, "INVALID_DIALECT", f"客語腔調只能是 {'、'.join(asr_models.HAKKA_DIALECTS)}")
+
     has_audio = audio is not None and bool(audio.filename)
     has_transcript = transcript is not None and bool(transcript.filename)
     if has_audio == has_transcript:
@@ -75,6 +84,7 @@ def upload_meeting(
                 meeting_name=name, date=d, start_time=st, end_time=et,
                 audio_file=audio.file, original_filename=audio.filename or "",
                 created_by=user["id"],
+                asr_language=asr_language, asr_dialect=hakka_dialect,
             )
         else:
             meeting = svc.create_meeting_from_transcript(
@@ -95,7 +105,25 @@ def upload_meeting(
         "status": meeting["status"],
         "created_at": _iso(meeting["created_at"]),
         "status_url": _status_url(meeting["id"]),
+        "asr_language": asr_language if has_audio else None,
     }
+
+
+@router.get("/asr-languages")
+def list_asr_languages() -> dict:
+    return {
+        "default": asr_models.DEFAULT_LANGUAGE,
+        "languages": [{"code": k, "label": v["label"], "model": v["model_id"]}
+                      for k, v in asr_models.LANGUAGES.items()],
+        "hakka_dialects": [{"code": k, "label": v[0]} for k, v in asr_models.HAKKA_DIALECTS.items()],
+        "default_hakka_dialect": asr_models.DEFAULT_HAKKA_DIALECT,
+    }
+
+
+@router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_meeting(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> Response:
+    _call(lambda: svc.delete_owned_meeting(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _parse_time(value: str | None, field: str) -> dt.time | None:
@@ -105,12 +133,6 @@ def _parse_time(value: str | None, field: str) -> dt.time | None:
         return dt.time.fromisoformat(value.strip())
     except ValueError:
         raise api_error(422, "INVALID_TIME", f"{field} 格式須為 HH:mm 或 HH:mm:ss") from None
-
-
-@router.delete("/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_meeting(meeting_id: str, request: Request, user: dict = Depends(get_current_user)) -> Response:
-    _call(lambda: svc.delete_owned_meeting(_parse_id(meeting_id), actor=user, ip=client_ip(request)))
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{meeting_id}/status")

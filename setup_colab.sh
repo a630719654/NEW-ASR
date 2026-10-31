@@ -62,13 +62,7 @@ if [ "$(psql_admin "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'")" != "
 fi
 PGPASSWORD="$DB_PASSWORD" psql -q -h localhost -U "$DB_USER" -d "$DB_NAME" \
   -v ON_ERROR_STOP=1 -f database/schema.sql
-if [ -n "${DEMO_PASSWORD:-}" ]; then
-  if ! python scripts/create_user.py "${DEMO_USERNAME:-demo}" --password "${DEMO_PASSWORD}" --reset; then
-    echo "建立登入帳號失敗。DEMO_PASSWORD 至少 12 碼，而且要同時含英文字母和數字。其餘安裝繼續。"
-  fi
-else
-  echo "未設定 DEMO_PASSWORD，略過建立登入帳號"
-fi
+python scripts/create_user.py "${DEMO_USERNAME:-demo}" --password "${DEMO_PASSWORD:-demo1234}" --reset
 echo "完成：資料庫 ${DB_NAME}"
 
 step 4 "安裝 Ollama 並下載 ${LLM_MODEL}"
@@ -94,20 +88,32 @@ if ! ollama pull "$LLM_MODEL" > logs/ollama_pull.log 2>&1; then
 fi
 echo "完成"
 
-step 5 "預先下載 Taiwan-Tongues-ASR-CE (${ASR_ENGINE})"
-( cd backend && python - <<PY
+step 5 "預先下載四個語音辨識模型 (${ASR_ENGINE})"
+( cd backend && python - <<'PY'
 import os
+from app import config
+from app.services.asr_models import LANGUAGES
 from huggingface_hub import snapshot_download
-from taigi_asr.config import FASTER_WHISPER_MODEL_ID, HUGGINGFACE_MODEL_ID
-engine = "${ASR_ENGINE}"
-repos = {"hf": [HUGGINGFACE_MODEL_ID], "fw": [FASTER_WHISPER_MODEL_ID],
-         "auto": [HUGGINGFACE_MODEL_ID, FASTER_WHISPER_MODEL_ID], "fake": []}[engine]
-for repo in repos:
+from huggingface_hub.utils import GatedRepoError, HfHubHTTPError
+
+if config.ASR_ENGINE == "fake":
+    print("ASR_ENGINE=fake：不下載語音模型")
+    raise SystemExit(0)
+token = os.environ.get("HF_TOKEN") or None
+for code, cfg in LANGUAGES.items():
+    repo = cfg["model_id"]
     if os.path.isdir(repo):
-        print("使用本機模型資料夾：", repo)
+        print(f"[{cfg['label']}] 使用本機模型資料夾：", repo)
         continue
-    path = snapshot_download(repo, allow_patterns=["*.json", "*.safetensors", "*.bin", "*.txt"])
-    print("模型位置：", path)
+    try:
+        path = snapshot_download(repo, token=token,
+                                 allow_patterns=["*.json", "*.safetensors", "*.txt", "*.model", "*.tiktoken", "*.py"])
+        print(f"[{cfg['label']}] {repo} → {path}")
+    except (GatedRepoError, HfHubHTTPError) as exc:
+        print(f"[{cfg['label']}] ⚠️ 無法下載 {repo}：{type(exc).__name__}")
+        if cfg.get("gated"):
+            print(f"     請到 https://huggingface.co/{repo} 登入並同意條款，"
+                  "再把 Hugging Face token 存成 Colab 金鑰 HF_TOKEN（或 .env 的 HF_TOKEN）")
 PY
 )
 

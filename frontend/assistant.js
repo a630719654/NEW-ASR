@@ -1,44 +1,123 @@
-const knight = (() => {
-  const svg = document.getElementById("knightSvg");
-  const badge = $("asBadge");
+const scribe = (() => {
+  const body = $("agBody"), shadow = $("agShadow"), badge = $("asBadge");
+  const imgs = Object.fromEntries([...body.querySelectorAll(".ag-pose")].map((i) => [i.dataset.pose, i]));
   const LABEL = { idle: "", search: "查資料中", listen: "聆聽中", proofread: "校對中", summary: "整理重點", done: "完成！", sleep: "" };
-  const FACE = { idle: ["open", "smile"], search: ["open", "flat"], listen: ["closed", "o"], proofread: ["open", "flat"],
-                 summary: ["open", "big"], done: ["happy", "big"], sleep: ["closed", "o"] };
-  const ACT = { twirl: [900, ["open", "smile"]], wave: [1600, ["happy", "big"]], stretch: [1800, ["closed", "o"]],
-                look: [2200, ["open", "smile"]], hop: [1000, ["happy", "smile"]] };
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let cur = "idle", lastAct = null, tAct = null, tSleep = null, tDone = null;
 
-  function face(f) { svg.dataset.eyes = f[0]; svg.dataset.mouth = f[1]; }
+  const BASE = { breath: 1, bf: 0.3, sway: 1.2, sf: 0.16, tilt: 0, bob: 0, bobf: 1, shake: 0, shf: 6 };
+  const STATE = {
+    idle:      { pose: "idle" },
+    search:    { pose: "search", breath: 0.8, bf: 0.45, sway: 3, sf: 0.3, tilt: 2, bob: 1.2, bobf: 0.9 },
+    listen:    { pose: "listen", breath: 1.2, bf: 0.5, sway: 2.4, sf: 0.45, tilt: 1.5 },
+    proofread: { pose: "proofread", breath: 0.6, bf: 0.4, sway: 0.5, sf: 0.2, tilt: -1, shake: 1.1, shf: 7 },
+    summary:   { pose: "summary", bf: 0.6, sway: 1.5, sf: 0.3, bob: 4, bobf: 1.5 },
+    done:      { pose: "done", bf: 0.6, sway: 0 },
+    sleep:     { pose: "sleep", breath: 2.4, bf: 0.18, sway: 0.8, sf: 0.08, tilt: -3 },
+  };
+  const ACTS = {
+    wave:  { pose: "wave", ms: 2000, sway: 3, sf: 0.9, hop: 1 },
+    think: { pose: "think", ms: 2800, tilt: -2.5, sway: 0.6, sf: 0.2 },
+    hop:   { pose: "idle", ms: 1100, hop: 2 },
+    look:  { pose: "idle", ms: 2600, sway: 5, sf: 0.35 },
+  };
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let cur = "idle", pose = "idle", z = 1, lastAct = null, acting = false;
+  let tAct = null, tSleep = null, tDone = null, tBlink = null, tHop = [];
+
+  function setPose(name, snap = false) {
+    if (name === pose || !imgs[name]) return;
+    const a = imgs[pose], b = imgs[name];
+    b.style.zIndex = ++z;
+    a.classList.toggle("snap", snap); b.classList.toggle("snap", snap);
+    b.classList.remove("out"); b.classList.add("on");
+    a.classList.remove("on"); a.classList.add("out");
+    pose = name;
+    if (!snap) kick(0.9);
+  }
+
+  const p = { ...BASE }, goal = { ...BASE };
+  const ph = { b: 0, s: 0, k: 0, h: 0 };
+  let lean = 0, leanGoal = 0, jy = 0, jv = 0, sq = 0, sqv = 0, raf = 0, last = 0;
+  let unit = 1;
+  function measure() { unit = (body.offsetWidth || 176) / 176; }
+  window.addEventListener("resize", measure);
+  function aim(extra) { Object.assign(goal, BASE, extra); }
+  function kick(v) { sqv += v; }
+  function hop(n = 1) {
+    tHop.forEach(clearTimeout); tHop = [];
+    for (let i = 0; i < n; i++) {
+      tHop.push(setTimeout(() => { kick(1.6); tHop.push(setTimeout(() => { jv = -230; }, 90)); }, i * 420));
+    }
+  }
+  function frame(now) {
+    raf = requestAnimationFrame(frame);
+    const dt = Math.min(0.05, (now - (last || now)) / 1000); last = now;
+    const k = 1 - Math.exp(-dt / 0.3);
+    for (const key in BASE) p[key] += (goal[key] - p[key]) * k;
+    lean += (leanGoal - lean) * (1 - Math.exp(-dt / 0.4));
+    const TAU = Math.PI * 2;
+    ph.b += dt * p.bf * TAU; ph.s += dt * p.sf * TAU; ph.k += dt * p.shf * TAU; ph.h += dt * p.bobf * TAU;
+    if (jv || jy) {
+      jy += jv * dt; jv += 1500 * dt;
+      if (jy >= 0) { jy = 0; if (jv > 120) kick(jv * 0.004); jv = 0; }
+    }
+    sqv += (-320 * sq - 16 * sqv) * dt; sq += sqv * dt;
+    const br = Math.sin(ph.b) * p.breath;
+    const sx = (1 - br * 0.006) * (1 + sq * 0.05);
+    const sy = (1 + br * 0.012) * (1 - sq * 0.05);
+    const y = (-Math.abs(Math.sin(ph.h)) * p.bob + jy) * unit;
+    const x = Math.sin(ph.k) * p.shake * unit;
+    const rot = p.tilt + Math.sin(ph.s) * p.sway + lean;
+    body.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px) rotate(${rot.toFixed(2)}deg) scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
+    const lift = Math.min(1, -y / (40 * unit));
+    shadow.style.transform = `scale(${(1 - lift * 0.35).toFixed(3)})`;
+    shadow.style.opacity = (1 - lift * 0.5).toFixed(3);
+  }
+
+  function scheduleBlink() {
+    clearTimeout(tBlink);
+    tBlink = setTimeout(() => {
+      if (cur === "idle" && pose === "idle") {
+        const blink = (then) => { setPose("blink", true); setTimeout(() => { if (pose === "blink") setPose("idle", true); then && setTimeout(then, 160); }, 120); };
+        Math.random() < 0.25 ? blink(() => blink()) : blink();
+      }
+      scheduleBlink();
+    }, 2500 + Math.random() * 3500);
+  }
+
   function show(s) {
-    clearTimeout(tAct); clearTimeout(tDone); delete svg.dataset.act;
-    cur = s; svg.dataset.state = s; face(FACE[s]);
+    clearTimeout(tAct); clearTimeout(tDone); acting = false;
+    cur = s;
+    setPose(STATE[s].pose);
+    aim(STATE[s]);
     badge.textContent = LABEL[s]; badge.hidden = !LABEL[s];
+    if (s === "done") hop(2);
     if (s === "idle") { scheduleAct(); armSleep(); }
   }
   function playAct(name) {
     if (cur !== "idle") return;
-    clearTimeout(tAct);
-    const [ms, f] = ACT[name];
-    svg.dataset.act = name; face(f); lastAct = name;
-    tAct = setTimeout(() => { delete svg.dataset.act; face(FACE.idle); scheduleAct(); }, ms + 150);
+    const a = ACTS[name];
+    clearTimeout(tAct); acting = true; lastAct = name;
+    setPose(a.pose); aim(a);
+    if (a.hop) hop(a.hop);
+    tAct = setTimeout(() => { acting = false; setPose("idle"); aim(STATE.idle); scheduleAct(); }, a.ms);
   }
   function scheduleAct() {
     clearTimeout(tAct);
-    if (reduce) return;
     tAct = setTimeout(() => {
-      if (cur !== "idle") return;
-      const pool = Object.keys(ACT).filter((k) => k !== lastAct);
+      if (cur !== "idle" || acting) return;
+      const pool = Object.keys(ACTS).filter((k) => k !== lastAct);
       playAct(pool[Math.floor(Math.random() * pool.length)]);
-    }, 3500 + Math.random() * 3500);
+    }, 4000 + Math.random() * 4000);
   }
   function armSleep() { clearTimeout(tSleep); tSleep = setTimeout(() => { if (cur === "idle") show("sleep"); }, 25000); }
+  function wake() { if (cur === "sleep") { show("idle"); hop(1); } else if (cur === "idle") armSleep(); }
 
   let job = null, chatBusy = false;
   function refresh(prevWorking) {
     const want = chatBusy ? "search" : job || null;
     if (want) { if (want !== cur) show(want); return; }
-    if (prevWorking) { show("done"); tDone = setTimeout(() => show("idle"), 1900); return; }
+    if (prevWorking) { show("done"); tDone = setTimeout(() => show("idle"), 2000); return; }
     if (cur !== "idle" && cur !== "sleep" && cur !== "done") show("idle");
   }
   const JOB = { uploaded: "listen", transcribing: "listen", proofreading: "proofread", summarizing: "summary" };
@@ -46,22 +125,25 @@ const knight = (() => {
   let lastMove = 0;
   window.addEventListener("pointermove", (e) => {
     const now = performance.now();
-    if (now - lastMove < 40) return;
+    if (now - lastMove < 50) return;
     lastMove = now;
-    const r = svg.getBoundingClientRect();
+    const r = body.getBoundingClientRect();
     if (!r.width) return;
-    const dx = Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width / 2)) / (r.width * 3)));
-    const dy = Math.max(-1, Math.min(1, (e.clientY - (r.top + r.height * 0.42)) / (r.height * 3)));
-    svg.style.setProperty("--ex", `${(dx * 2.6).toFixed(2)}px`);
-    svg.style.setProperty("--ey", `${(dy * 1.8).toFixed(2)}px`);
-    if (cur === "sleep") show("idle"); else if (cur === "idle") armSleep();
+    leanGoal = Math.max(-1, Math.min(1, (e.clientX - (r.left + r.width / 2)) / (r.width * 4))) * 3;
+    wake();
   }, { passive: true });
-  window.addEventListener("keydown", () => { if (cur === "sleep") show("idle"); else if (cur === "idle") armSleep(); });
+  window.addEventListener("keydown", wake);
 
   return {
-    start() { show("idle"); },
-    stop() { clearTimeout(tAct); clearTimeout(tSleep); clearTimeout(tDone); },
-    hop() { if (cur === "sleep") show("idle"); playAct("hop"); },
+    start() {
+      show("idle"); scheduleBlink(); measure();
+      if (!reduce && !raf) { last = 0; raf = requestAnimationFrame(frame); }
+    },
+    stop() {
+      [tAct, tSleep, tDone, tBlink, ...tHop].forEach(clearTimeout);
+      cancelAnimationFrame(raf); raf = 0;
+    },
+    hop() { if (cur === "sleep") show("idle"); hop(1); },
     setJob(status) {
       const was = Boolean(job || chatBusy);
       job = JOB[status] || null;
@@ -125,10 +207,10 @@ function cardActions(meetingId, segmentId) {
 async function call(fn, waitText = "查資料中…") {
   const wait = add(el("div", "as-msg wait", waitText));
   as.busy = true; $("asSend").disabled = true;
-  knight.setBusy(true);
+  scribe.setBusy(true);
   try { return await fn(); }
   catch (err) { botText(`出了點問題：${err.message}`); backChips(); return null; }
-  finally { wait.remove(); as.busy = false; $("asSend").disabled = false; knight.setBusy(false); }
+  finally { wait.remove(); as.busy = false; $("asSend").disabled = false; scribe.setBusy(false); }
 }
 
 function showMenu() {
@@ -292,7 +374,7 @@ async function doQuote(text) {
 async function doChat(question) {
   const r = await call(() => api("/api/v1/assistant/chat", {
     method: "POST", json: { question, history: as.history.slice(-6) },
-  }), "鉛筆小騎士正在翻會議紀錄…");
+  }), "鉛筆小書記正在翻會議紀錄…");
   if (!r) return;
   as.history.push({ role: "user", content: question }, { role: "assistant", content: r.text });
   if (r.trace && r.trace.length) {
@@ -341,7 +423,7 @@ function openPanel() {
   $("asLauncher").setAttribute("aria-label", "收起會議小幫手");
   if (!as.greeted) {
     as.greeted = true;
-    botText(`嗨 ${(state.user && state.user.username) || ""}，我是鉛筆小騎士！需要什麼幫助？選一個開始，或直接在下面問我。`);
+    botText(`嗨 ${(state.user && state.user.username) || ""}，我是鉛筆小書記！需要什麼幫助？選一個開始，或直接在下面問我。`);
     showMenu();
     loadOverview().catch(() => {});
   }
@@ -351,9 +433,9 @@ function closePanel() {
   as.open = false;
   $("asPanel").hidden = true;
   $("asLauncher").setAttribute("aria-expanded", "false");
-  $("asLauncher").setAttribute("aria-label", "打開會議小幫手（鉛筆小騎士）");
+  $("asLauncher").setAttribute("aria-label", "打開會議小幫手（鉛筆小書記）");
 }
-$("asLauncher").addEventListener("click", () => { knight.hop(); as.open ? closePanel() : openPanel(); });
+$("asLauncher").addEventListener("click", () => { scribe.hop(); as.open ? closePanel() : openPanel(); });
 $("asClose").addEventListener("click", closePanel);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && as.open) closePanel(); });
 
@@ -372,15 +454,15 @@ window.assistant = {
   onLogin() {
     $("assistant").hidden = false;
     $("asHint").hidden = false;
-    knight.start();
+    scribe.start();
     setTimeout(() => { $("asHint").hidden = true; }, 9000);
   },
   onLogout() {
-    knight.stop();
+    scribe.stop();
     closePanel();
     $("assistant").hidden = true;
     body().replaceChildren();
     Object.assign(as, { greeted: false, history: [], overview: null, mode: "chat" });
   },
-  onStatus(status) { knight.setJob(status); },
+  onStatus(status) { scribe.setJob(status); },
 };

@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import config
 from app.routers import assistant, auth, glossary, meetings
-from app.services import meeting_service
+from app.services import asr_models, meeting_service
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -31,6 +31,7 @@ def health() -> dict:
     return {
         "status": "ok",
         "asr_engine": config.ASR_ENGINE,
+        "asr_models": {k: v["model_id"] for k, v in asr_models.LANGUAGES.items()},
         "llm_backend": config.LLM_BACKEND,
         "llm_model": config.LLM_MODEL,
         "llm_temperature": config.LLM_TEMPERATURE,

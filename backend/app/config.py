@@ -41,15 +41,8 @@ ASSISTANT_MAX_STEPS = int(os.getenv("ASSISTANT_MAX_STEPS", "5"))
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Taipei")
 
 ASR_ENGINE = os.getenv("ASR_ENGINE", "hf").lower()
-ASR_UNLOAD_AFTER_USE = os.getenv("ASR_UNLOAD_AFTER_USE", "true").strip().lower() in ("1", "true", "yes")
 ASR_TO_TRADITIONAL = os.getenv("ASR_TO_TRADITIONAL", "true").strip().lower() in ("1", "true", "yes")
 
-ASR_LANGUAGE = (os.getenv("ASR_LANGUAGE", "auto").strip().lower() or "auto")
-ASR_LANG_DETECT_SECONDS = float(os.getenv("ASR_LANG_DETECT_SECONDS", "300"))
-ASR_LANG_CANDIDATES = [x.strip().lower() for x in os.getenv("ASR_LANG_CANDIDATES", "zh,en").split(",") if x.strip()]
-ASR_LANG_FALLBACK = os.getenv("ASR_LANG_FALLBACK", "zh").strip().lower() or "zh"
-ASR_LANG_DETECT_METHOD = os.getenv("ASR_LANG_DETECT_METHOD", "text").strip().lower() or "text"
-ASR_LANG_TEXT_THRESHOLD = float(os.getenv("ASR_LANG_TEXT_THRESHOLD", "0.6"))
 ASR_HALLUCINATION_MAX_S = float(os.getenv("ASR_HALLUCINATION_MAX_S", "2.0"))
 
 ASR_MERGE_GAP_S = float(os.getenv("ASR_MERGE_GAP_S", "1.0"))
@@ -59,7 +52,7 @@ ASR_DROP_QUIET_DB = float(os.getenv("ASR_DROP_QUIET_DB", "35"))
 
 AUDIO_DIR = Path(os.getenv("AUDIO_DIR", str(BACKEND_DIR / "storage" / "audio")))
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
 FRONTEND_DIR = PROJECT_DIR / "frontend"
 
-SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "43200"))
+SESSION_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "28800"))

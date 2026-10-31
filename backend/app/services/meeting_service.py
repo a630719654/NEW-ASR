@@ -13,6 +13,7 @@ from app.access import Missing, NotOwner, classify
 from app.db import get_conn
 from app.repositories import meetings, summaries, terms, transcripts
 from app import uploads
+from app.services import asr_models
 from app.services.asr_service import get_asr_service
 from app.services.language import SUPPORTED as SUMMARY_LANGUAGES, transcript_language
 from app.services.summarizer_service import get_summarizer_service
@@ -48,18 +49,7 @@ def on_startup() -> None:
         n = meetings.fail_interrupted(conn)
     if n:
         log.warning("有 %d 場會議因伺服器重啟而中斷，已標記為 failed", n)
-    if config.ASR_UNLOAD_AFTER_USE:
-        log.info("ASR_UNLOAD_AFTER_USE=true：不預先載入語音模型，每次辨識時才載入、辨識完卸載")
-    else:
-        _worker.submit(_warmup)
-
-
-def _warmup() -> None:
-    try:
-        get_asr_service().load()
-        log.info("ASR 模型已載入")
-    except Exception:
-        log.exception("ASR 模型預先載入失敗（第一次辨識時會再試一次）")
+    log.info("語音模型不預先載入：依每場會議選的語言，辨識時才載入、辨識完卸載")
 
 
 def _load_owned(conn, meeting_id, actor: dict, ip: str):
@@ -99,7 +89,11 @@ def create_meeting(
     audio_file: BinaryIO,
     original_filename: str,
     created_by=None,
+    asr_language: str = asr_models.DEFAULT_LANGUAGE,
+    asr_dialect: str | None = None,
 ) -> dict:
+    asr_language = asr_models.normalize_language(asr_language)
+    asr_dialect = asr_models.normalize_dialect(asr_dialect) if asr_language == "hak" else None
     meeting_id = uuid.uuid4()
     audio_path = uploads.audio_destination(config.AUDIO_DIR, meeting_id, original_filename)
 
@@ -117,10 +111,10 @@ def create_meeting(
                 created_by=created_by,
             )
     except Exception:
-        audio_path.unlink(missing_ok=True)
+        uploads.unlink_inside(config.AUDIO_DIR, str(audio_path))
         raise
 
-    _worker.submit(_run_transcription, meeting_id)
+    _worker.submit(_run_transcription, meeting_id, asr_language, asr_dialect)
     return meeting
 
 
@@ -175,11 +169,12 @@ def _save_upload(src: BinaryIO, dest: Path) -> None:
         if written == 0:
             raise ValueError("音檔是空的")
     except Exception:
-        dest.unlink(missing_ok=True)
+        uploads.unlink_inside(config.AUDIO_DIR, str(dest))
         raise
 
 
-def _run_transcription(meeting_id: uuid.UUID) -> None:
+def _run_transcription(meeting_id: uuid.UUID, language: str = asr_models.DEFAULT_LANGUAGE,
+                       dialect: str | None = None) -> None:
     try:
         with get_conn() as conn:
             meeting = meetings.update_status(conn, meeting_id, "transcribing")
@@ -187,15 +182,9 @@ def _run_transcription(meeting_id: uuid.UUID) -> None:
             return
 
         asr = get_asr_service()
-        try:
-            segments = asr.transcribe(meeting["audio_path"])
-            model_name = asr.model_name
-            asr_info = {"language": asr.last_language, "language_probs": asr.last_language_probs,
-                        "detect": asr.last_detect}
-        finally:
-            if config.ASR_UNLOAD_AFTER_USE:
-                asr.unload()
-                log.info("語音模型已卸載，釋放顯示卡記憶體")
+        segments = asr.transcribe(meeting["audio_path"], language, dialect)
+        model_name = asr.model_name
+        asr_info = asr.info()
         if not segments:
             raise ValueError("辨識結果是空的，可能是音檔沒有人聲")
 

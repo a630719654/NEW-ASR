@@ -14,7 +14,7 @@ const $ = (id) => document.getElementById(id);
 const STEP_ORDER = ["uploaded", "transcribing", "proofreading", "reviewing", "summarizing", "completed"];
 const STATUS_TEXT = {
   uploaded: "已上傳，等待處理…",
-  transcribing: "正在辨識語音（第一次會比較久，模型需要載入）…",
+  transcribing: "正在辨識語音（會先載入這個語言的模型，辨識完就關閉）…",
   proofreading: "AI 正在校對逐字稿的錯字（約需幾分鐘）…",
   reviewing: "請確認逐字稿：AI 找到的疑似錯字可以逐處套用、自己改、保留原文，或一鍵全部套用。確認後才能產生重點。",
   transcribed: "逐字稿已確認，可以按「產生重點」。",
@@ -146,6 +146,7 @@ function resetMeeting() {
   $("uploadForm").reset();
   $("uploadForm").elements.date.value = new Date().toLocaleDateString("sv-SE");
   setSource("audio");
+  setAsrLanguage("zh");
   if (window.MeetUI) MeetUI.onStatus("new");
   $("uploadCard").hidden = false;
   for (const id of ["progressCard", "transcriptCard", "summaryCard"]) $(id).hidden = true;
@@ -158,12 +159,31 @@ function setSource(source) {
   form.querySelector(`input[name=source][value=${source}]`).checked = true;
   const isAudio = source === "audio";
   $("audioField").hidden = !isAudio;
+  $("asrLangField").hidden = !isAudio;
   $("transcriptField").hidden = isAudio;
   form.elements.audio.required = isAudio;
   form.elements.transcript.required = !isAudio;
 }
 for (const r of document.querySelectorAll("input[name=source]")) {
   r.addEventListener("change", () => setSource(r.value));
+}
+
+const ASR_LANG_INFO = {
+  zh:  { label: "中文", model: "Breeze-ASR-25" },
+  nan: { label: "台語", model: "Breeze-ASR-26" },
+  hak: { label: "客語", model: "whisper-large-v3-taiwanese-hakka" },
+  en:  { label: "英文", model: "Qwen3-ASR-1.7B" },
+};
+function setAsrLanguage(lang) {
+  const form = $("uploadForm");
+  const input = form.querySelector(`input[name=asr_language][value=${lang}]`) || form.querySelector("input[name=asr_language]");
+  input.checked = true;
+  const info = ASR_LANG_INFO[input.value];
+  $("dialectField").hidden = input.value !== "hak";
+  $("asrLangHint").textContent = `辨識時只啟動 ${info.model}，辨識完就關閉，不占記憶體`;
+}
+for (const r of document.querySelectorAll("input[name=asr_language]")) {
+  r.addEventListener("change", () => setAsrLanguage(r.value));
 }
 
 $("uploadForm").addEventListener("submit", async (e) => {
@@ -173,6 +193,9 @@ $("uploadForm").addEventListener("submit", async (e) => {
   const source = form.get("source");
   form.delete("source");
   form.delete(source === "audio" ? "transcript" : "audio");
+  const asrLang = form.get("asr_language");
+  if (source !== "audio") { form.delete("asr_language"); form.delete("hakka_dialect"); }
+  else if (asrLang !== "hak") form.delete("hakka_dialect");
   showError($("uploadError"), "");
   $("uploadBtn").disabled = true;
   $("uploadBtn").textContent = "上傳中…";
@@ -180,7 +203,8 @@ $("uploadForm").addEventListener("submit", async (e) => {
     const data = await api("/api/v1/meetings", { method: "POST", form });
     state.meetingId = data.meeting_id;
     $("meetingTitle").textContent = data.meeting_name;
-    $("stepTranscribing").textContent = data.source_type === "transcript" ? "自動分段" : "語音辨識";
+    $("stepTranscribing").textContent = data.source_type === "transcript" ? "自動分段"
+      : `語音辨識（${(ASR_LANG_INFO[asrLang] || ASR_LANG_INFO.zh).label}）`;
     $("uploadCard").hidden = true;
     $("progressCard").hidden = false;
     renderStatus({ status: data.status, error: null });

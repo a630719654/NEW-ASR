@@ -68,6 +68,16 @@ def sync_code():
 
 sync_code()
 os.chdir(PROJECT_DIR)
+
+if not os.environ.get('HF_TOKEN'):
+    try:
+        from google.colab import userdata
+        _tok = userdata.get('HF_TOKEN')
+        if _tok:
+            os.environ['HF_TOKEN'] = _tok
+            print('✅ 已讀取 Colab 金鑰 HF_TOKEN（客語模型可下載）')
+    except Exception:
+        print('ℹ️ 沒有 Colab 金鑰 HF_TOKEN：中文／台語／英文可用；客語模型需要先設定才能下載')
 print('✅ 專案來源：', SOURCE_DIR)
 print('✅ 執行位置：', PROJECT_DIR)
 
@@ -148,7 +158,7 @@ if not health:
     with open(os.path.join(LOG_DIR, 'backend.log'), encoding='utf-8', errors='replace') as f:
         print(''.join(f.readlines()[-30:]))
     raise RuntimeError('❌ 後端沒有啟動成功，上面是 log 最後 30 行')
-print('✅ 後端已啟動')
+print('✅ 後端已啟動（帳號 demo / 密碼 demo1234）')
 print(f"   LLM：{health.get('llm_model')}　溫度 {health.get('llm_temperature')}　seed {health.get('llm_seed')}"
       f"　思考 {health.get('llm_think')}　上下文 {health.get('llm_num_ctx')}")
 
@@ -195,7 +205,7 @@ if USE_TUNNEL:
 step('完成')
 if PUBLIC_URL:
     print('👉 用瀏覽器打開：', PUBLIC_URL)
-    print('   登入帳號見 .env 的 DEMO_USERNAME / DEMO_PASSWORD')
+    print('   帳號 demo / 密碼 demo1234')
     print('   ※ 若顯示「無法連上這個網站」：等 30 秒後重新整理；仍不行，在 Windows 命令提示字元執行')
     print('     ipconfig /flushdns 再重新整理（電腦記住了「查不到」的結果）')
     print('   ※ 每次重跑都會換新網址，舊網址會失效')
